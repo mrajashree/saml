@@ -100,45 +100,23 @@ const DefaultValidDuration = time.Hour * 24 * 2
 const DefaultCacheDuration = time.Hour * 24 * 1
 
 // Metadata returns the service provider metadata
-func (sp *ServiceProvider) Metadata() *EntityDescriptor {
-	validDuration := DefaultValidDuration
-	if sp.MetadataValidDuration > 0 {
-		validDuration = sp.MetadataValidDuration
+func (sp *ServiceProvider) Metadata() *Metadata {
+	if cert, _ := pem.Decode([]byte(sp.Certificate)); cert != nil {
+		sp.Certificate = base64.StdEncoding.EncodeToString(cert.Bytes)
 	}
 
-	authnRequestsSigned := false
-	wantAssertionsSigned := true
-	validUntil := TimeNow().Add(validDuration)
-	return &EntityDescriptor{
-		EntityID:   sp.MetadataURL.String(),
-		ValidUntil: validUntil,
-
-		SPSSODescriptors: []SPSSODescriptor{
-			{
-				SSODescriptor: SSODescriptor{
-					RoleDescriptor: RoleDescriptor{
-						ProtocolSupportEnumeration: "urn:oasis:names:tc:SAML:2.0:protocol",
-						KeyDescriptors: []KeyDescriptor{
-							{
-								Use: "signing",
-								KeyInfo: KeyInfo{
-									Certificate: base64.StdEncoding.EncodeToString(sp.Certificate.Raw),
-								},
-							},
-							{
-								Use: "encryption",
-								KeyInfo: KeyInfo{
-									Certificate: base64.StdEncoding.EncodeToString(sp.Certificate.Raw),
-								},
-								EncryptionMethods: []EncryptionMethod{
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes128-cbc"},
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes192-cbc"},
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#aes256-cbc"},
-									{Algorithm: "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"},
-								},
-							},
-						},
-						ValidUntil: validUntil,
+	return &Metadata{
+		EntityID:   sp.MetadataURL,
+		ValidUntil: TimeNow().Add(DefaultValidDuration),
+		SPSSODescriptor: &SPSSODescriptor{
+			AuthnRequestsSigned:        false,
+			WantAssertionsSigned:       true,
+			ProtocolSupportEnumeration: "urn:oasis:names:tc:SAML:2.0:protocol urn:oasis:names:tc:SAML:1.1:protocol http://schemas.xmlsoap.org/ws/2003/07/secext",
+			KeyDescriptor: []KeyDescriptor{
+				{
+					Use: "signing",
+					KeyInfo: KeyInfo{
+						Certificate: sp.Certificate,
 					},
 				},
 				AuthnRequestsSigned:  &authnRequestsSigned,
@@ -152,6 +130,16 @@ func (sp *ServiceProvider) Metadata() *EntityDescriptor {
 					},
 				},
 			},
+			AssertionConsumerService: []IndexedEndpoint{{
+				Binding:  HTTPPostBinding,
+				Location: sp.AcsURL,
+				Index:    1,
+			}},
+			NameIDPolicy: []NameIDPolicy{{
+				Format:      "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+				AllowCreate: true,
+			}},
+			Destination: sp.AcsURL,
 		},
 	}
 }
@@ -207,14 +195,12 @@ func (sp *ServiceProvider) GetSSOBindingLocation(binding string) string {
 
 // getIDPSigningCert returns the certificate which we can use to verify things
 // signed by the IDP in PEM format, or nil if no such certificate is found.
-func (sp *ServiceProvider) getIDPSigningCert() (*x509.Certificate, error) {
-	certStr := ""
-	for _, idpSSODescriptor := range sp.IDPMetadata.IDPSSODescriptors {
-		for _, keyDescriptor := range idpSSODescriptor.KeyDescriptors {
-			if keyDescriptor.Use == "signing" {
-				certStr = keyDescriptor.KeyInfo.Certificate
-				break
-			}
+func (sp *ServiceProvider) getIDPSigningCert() []byte {
+	cert := ""
+	for _, keyDescriptor := range sp.IDPMetadata.IDPSSODescriptor.KeyDescriptor {
+		if keyDescriptor.Use == "signing" {
+			cert = keyDescriptor.KeyInfo.Certificate
+			break
 		}
 	}
 
@@ -234,19 +220,13 @@ func (sp *ServiceProvider) getIDPSigningCert() (*x509.Certificate, error) {
 	if certStr == "" {
 		return nil, errors.New("cannot find any signing certificate in the IDP SSO descriptor")
 	}
-
-	// cleanup whitespace
-	certStr = regexp.MustCompile(`\s+`).ReplaceAllString(certStr, "")
-	certBytes, err := base64.StdEncoding.DecodeString(certStr)
-	if err != nil {
-		return nil, fmt.Errorf("cannot parse certificate: %s", err)
-	}
-
-	parsedCert, err := x509.ParseCertificate(certBytes)
-	if err != nil {
-		return nil, err
-	}
-	return parsedCert, nil
+	// cleanup whitespace and re-encode a PEM
+	cert = regexp.MustCompile("\\s+").ReplaceAllString(cert, "")
+	certBytes, _ := base64.StdEncoding.DecodeString(cert)
+	certBytes = pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes})
+	return certBytes
 }
 
 // MakeAuthenticationRequest produces a new AuthnRequest object for idpURL.
@@ -270,16 +250,17 @@ func (sp *ServiceProvider) MakeAuthenticationRequest(idpURL string) (*AuthnReque
 		ID:                          fmt.Sprintf("id-%x", randomBytes(20)),
 		IssueInstant:                TimeNow(),
 		Version:                     "2.0",
-		Issuer: &Issuer{
+		ProtocolBinding:             HTTPPostBinding,
+		Issuer: Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
 			Value:  sp.MetadataURL.String(),
 		},
-		NameIDPolicy: &NameIDPolicy{
-			AllowCreate: &allowCreate,
-			// TODO(ross): figure out exactly policy we need
-			// urn:mace:shibboleth:1.0:nameIdentifier
-			// urn:oasis:names:tc:SAML:2.0:nameid-format:transient
-			Format: &nameIDFormat,
+		NameIDPolicy: NameIDPolicy{
+			XMLName: xml.Name{
+				Local: "NameIDPolicy",
+			},
+			AllowCreate: true,
+			Format:      "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
 		},
 		ForceAuthn: sp.ForceAuthn,
 	}
@@ -299,9 +280,8 @@ func (sp *ServiceProvider) MakePostAuthenticationRequest(relayState string) ([]b
 
 // Post returns an HTML form suitable for using the HTTP-POST binding with the request
 func (req *AuthnRequest) Post(relayState string) []byte {
-	doc := etree.NewDocument()
-	doc.SetRoot(req.Element())
-	reqBuf, err := doc.WriteToBytes()
+
+	reqBuf, err := xml.Marshal(req)
 	if err != nil {
 		panic(err)
 	}
@@ -396,15 +376,15 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 		return nil, retErr
 	}
 	retErr.Response = string(rawResponseBuf)
-
 	// do some validation first before we decrypt
 	resp := Response{}
 	if err := xml.Unmarshal(rawResponseBuf, &resp); err != nil {
 		retErr.PrivateErr = fmt.Errorf("cannot unmarshal response: %s", err)
 		return nil, retErr
 	}
-	if resp.Destination != sp.AcsURL.String() {
-		retErr.PrivateErr = fmt.Errorf("`Destination` does not match AcsURL (expected %q)", sp.AcsURL.String())
+
+	if resp.Destination != sp.AcsURL {
+		retErr.PrivateErr = fmt.Errorf("`Destination` does not match AcsURL (expected %q)", sp.AcsURL)
 		return nil, retErr
 	}
 
@@ -415,7 +395,7 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 		}
 	}
 	if !requestIDvalid {
-		retErr.PrivateErr = fmt.Errorf("`InResponseTo` does not match any of the possible request IDs (expected %v)", possibleRequestIDs)
+		retErr.PrivateErr = fmt.Errorf("`InResponseTo` %v does not match any of the possible request IDs (expected %v)", resp.InResponseTo, possibleRequestIDs)
 		return nil, retErr
 	}
 

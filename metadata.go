@@ -185,13 +185,21 @@ type IndexedEndpoint struct {
 
 // SSODescriptor represents the SAML complex type SSODescriptor
 //
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf §2.4.2
-type SSODescriptor struct {
-	RoleDescriptor
-	ArtifactResolutionServices []IndexedEndpoint `xml:"ArtifactResolutionService"`
-	SingleLogoutServices       []Endpoint        `xml:"SingleLogoutService"`
-	ManageNameIDServices       []Endpoint        `xml:"ManageNameIDService"`
-	NameIDFormats              []NameIDFormat    `xml:"NameIDFormat"`
+// See http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf section 2.4.2
+type SPSSODescriptor struct {
+	XMLName                    xml.Name          `xml:"urn:oasis:names:tc:SAML:2.0:metadata SPSSODescriptor"`
+	AuthnRequestsSigned        bool              `xml:",attr"`
+	WantAssertionsSigned       bool              `xml:",attr"`
+	ProtocolSupportEnumeration string            `xml:"protocolSupportEnumeration,attr"`
+	KeyDescriptor              []KeyDescriptor   `xml:"KeyDescriptor"`
+	ArtifactResolutionService  []IndexedEndpoint `xml:"ArtifactResolutionService"`
+	SingleLogoutService        []Endpoint        `xml:"SingleLogoutService"`
+	ManageNameIDService        []Endpoint
+	NameIDFormat               []string          `xml:"NameIDFormat"`
+	NameIDPolicy               []NameIDPolicy    `xml:"NameIDPolicy"`
+	Destination                string            `sml:"Destination"`
+	AssertionConsumerService   []IndexedEndpoint `xml:"AssertionConsumerService"`
+	AttributeConsumingService  []interface{}
 }
 
 // IDPSSODescriptor represents the SAML IDPSSODescriptorType object.

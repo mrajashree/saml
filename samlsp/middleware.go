@@ -122,14 +122,12 @@ func (m *Middleware) RequireAccount(handler http.Handler) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		// relayState is limited to 80 bytes but also must be integrety protected.
 		// this means that we cannot use a JWT because it is way to long. Instead
 		// we set a cookie that corresponds to the state
 		relayState := base64.URLEncoding.EncodeToString(randomBytes(42))
-
-		secretBlock := x509.MarshalPKCS1PrivateKey(m.ServiceProvider.Key)
-		state := jwt.New(jwtSigningMethod)
+		secretBlock, _ := pem.Decode([]byte(m.ServiceProvider.Key))
+		state := jwt.New(jwt.GetSigningMethod("HS256"))
 		claims := state.Claims.(jwt.MapClaims)
 		claims["id"] = req.ID
 		claims["uri"] = r.URL.String()
@@ -138,26 +136,17 @@ func (m *Middleware) RequireAccount(handler http.Handler) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		m.ClientState.SetState(w, r, relayState, signedState)
-		if binding == saml.HTTPRedirectBinding {
-			redirectURL := req.Redirect(relayState)
-			w.Header().Add("Location", redirectURL.String())
-			w.WriteHeader(http.StatusFound)
-			return
-		}
-		if binding == saml.HTTPPostBinding {
-			w.Header().Add("Content-Security-Policy", ""+
-				"default-src; "+
-				"script-src 'sha256-AjPdJSbZmeWHnEc5ykvJFay8FTWeTeRbs9dutfZ0HqE='; "+
-				"reflected-xss block; referrer no-referrer;")
-			w.Header().Add("Content-type", "text/html")
-			w.Write([]byte(`<!DOCTYPE html><html><body>`))
-			w.Write(req.Post(relayState))
-			w.Write([]byte(`</body></html>`))
-			return
-		}
-		panic("not reached")
+		http.SetCookie(w, &http.Cookie{
+			Name:     fmt.Sprintf("saml_%s", relayState),
+			Value:    signedState,
+			MaxAge:   int(saml.MaxIssueDelay.Seconds()),
+			HttpOnly: false,
+			Path:     acsURL.Path,
+		})
+		redirectURL := req.Redirect(relayState)
+		w.Header().Add("Location", redirectURL.String())
+		w.WriteHeader(http.StatusFound)
+		return
 	}
 	return http.HandlerFunc(fn)
 }
@@ -215,21 +204,27 @@ func (m *Middleware) Authorize(w http.ResponseWriter, r *http.Request, assertion
 			return
 		}
 		claims := state.Claims.(jwt.MapClaims)
+		if claims == nil {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
 		redirectURI = claims["uri"].(string)
 
 		// delete the cookie
 		m.ClientState.DeleteState(w, r, relayState)
 	}
 
-	now := saml.TimeNow()
-	claims := AuthorizationToken{}
-	claims.Audience = m.ServiceProvider.Metadata().EntityID
-	claims.IssuedAt = now.Unix()
-	claims.ExpiresAt = now.Add(m.TokenMaxAge).Unix()
-	claims.NotBefore = now.Unix()
-	if sub := assertion.Subject; sub != nil {
-		if nameID := sub.NameID; nameID != nil {
-			claims.StandardClaims.Subject = nameID.Value
+	token := jwt.New(jwt.GetSigningMethod("HS256"))
+	claims := token.Claims.(jwt.MapClaims)
+	if assertion.AttributeStatement == nil {
+		log.Printf("No AttributeStatement received\n")
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	for _, attr := range assertion.AttributeStatement.Attributes {
+		valueStrings := []string{}
+		for _, v := range attr.Values {
+			valueStrings = append(valueStrings, v.Value)
 		}
 	}
 	for _, attributeStatement := range assertion.AttributeStatements {
