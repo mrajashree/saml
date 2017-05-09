@@ -122,7 +122,6 @@ func (m *Middleware) RequireAccount(handler http.Handler) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 		// relayState is limited to 80 bytes but also must be integrety protected.
 		// this means that we cannot use a JWT because it is way to long. Instead
 		// we set a cookie that corresponds to the state
@@ -215,6 +214,10 @@ func (m *Middleware) Authorize(w http.ResponseWriter, r *http.Request, assertion
 			return
 		}
 		claims := state.Claims.(jwt.MapClaims)
+		if claims == nil {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
 		redirectURI = claims["uri"].(string)
 
 		// delete the cookie

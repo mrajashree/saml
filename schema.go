@@ -14,118 +14,16 @@ import (
 //
 // See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
 type AuthnRequest struct {
-	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
-
-	ID           string    `xml:",attr"`
-	Version      string    `xml:",attr"`
-	IssueInstant time.Time `xml:",attr"`
-	Destination  string    `xml:",attr"`
-	Consent      string    `xml:",attr"`
-	Issuer       *Issuer   `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
-	Signature    *etree.Element
-
-	Subject      *Subject
-	NameIDPolicy *NameIDPolicy `xml:"urn:oasis:names:tc:SAML:2.0:protocol NameIDPolicy"`
-	Conditions   *Conditions
-	//RequestedAuthnContext *RequestedAuthnContext // TODO
-	//Scoping               *Scoping // TODO
-
-	ForceAuthn                     *bool  `xml:",attr"`
-	IsPassive                      *bool  `xml:",attr"`
-	AssertionConsumerServiceIndex  string `xml:",attr"`
-	AssertionConsumerServiceURL    string `xml:",attr"`
-	ProtocolBinding                string `xml:",attr"`
-	AttributeConsumingServiceIndex string `xml:",attr"`
-	ProviderName                   string `xml:",attr"`
-}
-
-// Element returns an etree.Element representing the object
-// Element returns an etree.Element representing the object in XML form.
-func (r *AuthnRequest) Element() *etree.Element {
-	el := etree.NewElement("samlp:AuthnRequest")
-	el.CreateAttr("xmlns:saml", "urn:oasis:names:tc:SAML:2.0:assertion")
-	el.CreateAttr("xmlns:samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
-	el.CreateAttr("ID", r.ID)
-	el.CreateAttr("Version", r.Version)
-	el.CreateAttr("IssueInstant", r.IssueInstant.Format(timeFormat))
-	if r.Destination != "" {
-		el.CreateAttr("Destination", r.Destination)
-	}
-	if r.Consent != "" {
-		el.CreateAttr("Consent", r.Consent)
-	}
-	if r.Issuer != nil {
-		el.AddChild(r.Issuer.Element())
-	}
-	if r.Signature != nil {
-		el.AddChild(r.Signature)
-	}
-	if r.Subject != nil {
-		el.AddChild(r.Subject.Element())
-	}
-	if r.NameIDPolicy != nil {
-		el.AddChild(r.NameIDPolicy.Element())
-	}
-	if r.Conditions != nil {
-		el.AddChild(r.Conditions.Element())
-	}
-	//if r.RequestedAuthnContext != nil {
-	//	el.AddChild(r.RequestedAuthnContext.Element())
-	//}
-	//if r.Scoping != nil {
-	//	el.AddChild(r.Scoping.Element())
-	//}
-	if r.ForceAuthn != nil {
-		el.CreateAttr("ForceAuthn", strconv.FormatBool(*r.ForceAuthn))
-	}
-	if r.IsPassive != nil {
-		el.CreateAttr("IsPassive", strconv.FormatBool(*r.IsPassive))
-	}
-	if r.AssertionConsumerServiceIndex != "" {
-		el.CreateAttr("AssertionConsumerServiceIndex", r.AssertionConsumerServiceIndex)
-	}
-	if r.AssertionConsumerServiceURL != "" {
-		el.CreateAttr("AssertionConsumerServiceURL", r.AssertionConsumerServiceURL)
-	}
-	if r.ProtocolBinding != "" {
-		el.CreateAttr("ProtocolBinding", r.ProtocolBinding)
-	}
-	if r.AttributeConsumingServiceIndex != "" {
-		el.CreateAttr("AttributeConsumingServiceIndex", r.AttributeConsumingServiceIndex)
-	}
-	if r.ProviderName != "" {
-		el.CreateAttr("ProviderName", r.ProviderName)
-	}
-	return el
-}
-
-// MarshalXML implements xml.Marshaler
-func (r *AuthnRequest) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
-	type Alias AuthnRequest
-	aux := &struct {
-		IssueInstant RelaxedTime `xml:",attr"`
-		*Alias
-	}{
-		IssueInstant: RelaxedTime(r.IssueInstant),
-		Alias:        (*Alias)(r),
-	}
-	return e.Encode(aux)
-}
-
-// UnmarshalXML implements xml.Unmarshaler
-func (r *AuthnRequest) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
-	type Alias AuthnRequest
-	aux := &struct {
-		IssueInstant RelaxedTime `xml:",attr"`
-		*Alias
-	}{
-		Alias: (*Alias)(r),
-	}
-	if err := d.DecodeElement(&aux, &start); err != nil {
-		return err
-	}
-	r.IssueInstant = time.Time(aux.IssueInstant)
-	return nil
+	XMLName                     xml.Name          `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
+	AssertionConsumerServiceURL string            `xml:",attr"`
+	Destination                 string            `xml:",attr"`
+	ID                          string            `xml:",attr"`
+	IssueInstant                time.Time         `xml:",attr"`
+	ProtocolBinding             string            `xml:",attr"`
+	Version                     string            `xml:",attr"`
+	Issuer                      Issuer            `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
+	Signature                   *xmlsec.Signature `xml:"http://www.w3.org/2000/09/xmldsig# Signature"`
+	NameIDPolicy                NameIDPolicy      `xml:"NameIDPolicy"`
 }
 
 // Issuer represents the SAML object of the same name.
@@ -160,13 +58,12 @@ func (a *Issuer) Element() *etree.Element {
 }
 
 // NameIDPolicy represents the SAML object of the same name.
-//
-// See http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+//PingIDP changes: mattbird library
 type NameIDPolicy struct {
 	XMLName         xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:protocol NameIDPolicy"`
-	Format          *string  `xml:",attr"`
+	Format          *string  `xml:"Format,attr"`
 	SPNameQualifier *string  `xml:",attr"`
-	AllowCreate     *bool    `xml:",attr"`
+	AllowCreate     *bool    `xml:"AllowCreate,attr"`
 }
 
 // Element returns an etree.Element representing the object in XML form.

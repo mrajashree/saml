@@ -275,6 +275,9 @@ func (sp *ServiceProvider) MakeAuthenticationRequest(idpURL string) (*AuthnReque
 			Value:  sp.MetadataURL.String(),
 		},
 		NameIDPolicy: &NameIDPolicy{
+			XMLName: xml.Name{
+				Local: "NameIDPolicy",
+			},
 			AllowCreate: &allowCreate,
 			// TODO(ross): figure out exactly policy we need
 			// urn:mace:shibboleth:1.0:nameIdentifier
@@ -396,7 +399,6 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 		return nil, retErr
 	}
 	retErr.Response = string(rawResponseBuf)
-
 	// do some validation first before we decrypt
 	resp := Response{}
 	if err := xml.Unmarshal(rawResponseBuf, &resp); err != nil {
@@ -415,7 +417,7 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 		}
 	}
 	if !requestIDvalid {
-		retErr.PrivateErr = fmt.Errorf("`InResponseTo` does not match any of the possible request IDs (expected %v)", possibleRequestIDs)
+		retErr.PrivateErr = fmt.Errorf("`InResponseTo` %v does not match any of the possible request IDs (expected %v)", resp.InResponseTo, possibleRequestIDs)
 		return nil, retErr
 	}
 
