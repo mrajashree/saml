@@ -135,11 +135,6 @@ func (sp *ServiceProvider) Metadata() *Metadata {
 				Location: sp.AcsURL,
 				Index:    1,
 			}},
-			NameIDPolicy: []NameIDPolicy{{
-				Format:      "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
-				AllowCreate: true,
-			}},
-			Destination: sp.AcsURL,
 		},
 	}
 }
